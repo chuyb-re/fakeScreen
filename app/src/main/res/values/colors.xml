@@ -7,4 +7,12 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- 主界面配色 -->
+    <color name="background_window">#F8F9FA</color>
+    <color name="background_card">#FFFFFF</color>
+    <color name="border_card">#EEF0F2</color>
+    <color name="text_primary">#1A1C1E</color>
+    <color name="text_secondary">#44474E</color>
+    <color name="divider_line">#F2F4F7</color>
 </resources>

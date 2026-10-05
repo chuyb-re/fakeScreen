@@ -1,11 +1,8 @@
 package top.chuyb.fakeScreen;
 
 import android.content.Intent;
-import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
-import android.provider.Settings;
-import android.util.Log;
 import android.view.Window;
 import android.widget.LinearLayout;
 import android.widget.Toast;
@@ -16,90 +13,82 @@ import androidx.appcompat.widget.SwitchCompat;
 import androidx.core.view.WindowCompat;
 
 /**
- * Main activity for user interface configuration and status toggling.
+ * 主界面（表现层）：只负责加载 XML 布局、设置窗口外观并分发用户交互事件，
+ * 状态读写与进程间通信全部由业务层 {@link FakeScreenState} 承担。
+ *
  * @since 1.0
  * @author chuyb-re
  */
 public class MainActivity extends AppCompatActivity {
 
-    private static final String TAG = "FakeScreen";
-
-    public static final String KEY_FAKE_SCREEN_ENABLED = "top_chuyb_fakeScreen_enabled";
-    public static final String ACTION_TOGGLE_FAKE_SCREEN = "top.chuyb.fakeScreen.ACTION_TOGGLE";
-
     /**
-     * Initializes activity layout, window elements, and UI click listeners.
+     * 初始化界面布局、窗口元素与各控件的事件监听。
      *
-     * @param savedInstanceState Bundle containing activity's previously saved state, if any.
+     * @param savedInstanceState 保存的界面状态，可能为 null。
      */
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
         setupEdgeToEdgeWindow();
         setContentView(R.layout.activity_main);
-
         initSwitchButton();
+        initHideIconButton();
         initGithubButton();
         initTipsButton();
     }
 
     /**
-     * Configures edge-to-edge window drawing, transparent status bar, and light bar icons.
+     * 开启 edge-to-edge 绘制，使 XML 布局延伸到系统栏下方。
+     *
+     * <p>系统栏颜色、状态栏图标明暗与窗口底色都在 {@code themes.xml} 中声明；
+     * 只有这一个窗口开关没有对应的主题属性，因此保留在代码中。</p>
      */
     private void setupEdgeToEdgeWindow() {
         Window window = getWindow();
         WindowCompat.setDecorFitsSystemWindows(window, false);
-        window.setStatusBarColor(Color.TRANSPARENT);
-        window.setNavigationBarColor(Color.TRANSPARENT);
-        window.getDecorView().setBackgroundColor(Color.parseColor("#F8F9FA"));
-
-        WindowCompat.getInsetsController(window, window.getDecorView())
-                .setAppearanceLightStatusBars(true);
     }
 
     /**
-     * Binds the main switch widget, reads global setting state, and broadcasts state toggles.
+     * 绑定功能开关控件，读取全局设置状态，并在切换时发送广播。
      */
     private void initSwitchButton() {
         SwitchCompat switchBtn = findViewById(R.id.switch_fake_screen);
         if (switchBtn == null) return;
-
-        int currentState = 0;
-        try {
-            currentState = Settings.Global.getInt(getContentResolver(), KEY_FAKE_SCREEN_ENABLED, 0);
-        } catch (Throwable e) {
-            Log.e(TAG, "Failed to read Settings.Global state", e);
-        }
-        switchBtn.setChecked(currentState == 1);
-
-        switchBtn.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            Intent intent = new Intent(ACTION_TOGGLE_FAKE_SCREEN);
-            intent.putExtra("enabled", isChecked);
-            sendBroadcast(intent);
-        });
+        switchBtn.setChecked(FakeScreenState.isEnabled(this));
+        switchBtn.setOnCheckedChangeListener((buttonView, isChecked) ->
+                FakeScreenState.setEnabled(this, isChecked));
     }
 
     /**
-     * Binds the GitHub link button click listener to open repository URL in browser.
+     * 绑定“隐藏桌面图标”开关，读取并应用启动器组件的启用状态。
+     */
+    private void initHideIconButton() {
+        SwitchCompat switchBtn = findViewById(R.id.switch_hide_icon);
+        if (switchBtn == null) return;
+        switchBtn.setChecked(DesktopIconHelper.isHidden(this));
+        switchBtn.setOnCheckedChangeListener((buttonView, isChecked) ->
+                DesktopIconHelper.applySetting(this, isChecked));
+    }
+
+    /**
+     * 绑定 GitHub 按钮点击事件，在浏览器中打开仓库地址。
      */
     private void initGithubButton() {
         LinearLayout btnGithub = findViewById(R.id.btn_github);
         if (btnGithub == null) return;
-
         btnGithub.setOnClickListener(v -> {
             try {
                 String url = getString(R.string.github_repo_url);
                 Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
                 startActivity(intent);
             } catch (Exception e) {
-                Toast.makeText(this, "Unable to open browser", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, R.string.toast_browser_unavailable, Toast.LENGTH_SHORT).show();
             }
         });
     }
 
     /**
-     * Binds the usage tips button click listener to show instruction dialog.
+     * 绑定使用提示按钮点击事件，弹出说明对话框。
      */
     private void initTipsButton() {
         LinearLayout btnTips = findViewById(R.id.btn_tips);

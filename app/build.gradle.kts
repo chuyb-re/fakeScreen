@@ -1,45 +1,55 @@
 plugins {
-    id("com.android.application")
+    alias(libs.plugins.agp.app)
 }
 
 android {
     namespace = "top.chuyb.fakeScreen"
-    compileSdk = 34
+    compileSdk = 37
+    buildToolsVersion = "37.0.0"
 
     defaultConfig {
-        applicationId = "top.chuyb.fakeScreen"
-        minSdk = 28
-        targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        //noinspection ExpiredTargetSdkVersion
+        targetSdk = 31
+        minSdk = 26
+        versionCode = 20
+        versionName = "2.0"
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-            signingConfig = signingConfigs.getByName("debug")
+            proguardFiles("proguard-rules.pro")
+            signingConfig = signingConfigs["debug"]
         }
     }
 
+    buildFeatures {
+        viewBinding = true
+    }
+
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 
     packaging {
         resources {
             merges += "META-INF/xposed/*"
+            excludes += "**"
         }
+    }
+
+    lint {
+        abortOnError = true
+        checkReleaseBuilds = false
     }
 }
 
 dependencies {
-    implementation("androidx.appcompat:appcompat:1.7.1")
-    implementation("com.google.android.material:material:1.9.0")
-    compileOnly("io.github.libxposed:api:102.0.0")
+    implementation(libs.core)
+    implementation(libs.appcompat)
+    compileOnly(libs.libxposed.api)
+    implementation(libs.libxposed.service)
+    implementation("com.google.android.material:material:1.12.0")
 }

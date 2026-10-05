@@ -1,49 +1,34 @@
 package top.chuyb.fakeScreen;
 
-import android.annotation.SuppressLint;
-import android.content.BroadcastReceiver;
-import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
-import android.os.Build;
 import android.os.Handler;
-import android.os.IBinder;
 import android.os.Looper;
-import android.provider.Settings;
 import android.util.Log;
-
-import androidx.core.content.ContextCompat;
 
 import io.github.libxposed.api.XposedModule;
 import io.github.libxposed.api.XposedModuleInterface;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
 
 /**
- * Main Xposed module entry point for intercepting power button actions
- * and controlling screen power modes directly via SurfaceControl.
+ * Xposed 模块入口：安装 hook，并决定电源键被按下时如何处理。所有与 hook 无关的逻辑都放在各自的类中：
+ * {@link FakeScreenIpc}（IPC / 状态同步）、{@link DisplayPowerControl}（显示电源模式）、
+ * {@link ScreenTimeoutController}（屏幕超时）与 {@link ReflectUtils}（反射工具）。
+ *
  * @since 1.0
  * @author chuyb-re
  */
 public class MainHook extends XposedModule {
     private static final String TAG = "FakeScreen";
 
-    private static final int POWER_MODE_OFF = 0;    // Screen off
-    private static final int POWER_MODE_NORMAL = 2; // Screen on
-    private static volatile int mTargetPowerMode = POWER_MODE_OFF;
-
-    private static volatile boolean sIsFakeScreenEnabled = false;
-
     private static final Handler mHandler = new Handler(Looper.getMainLooper());
     private static Runnable mPendingPowerTask = null;
-    private static final long MULTI_PRESS_TIMEOUT_MS = 220; // Multi-press debounce timeout
+    private static final long MULTI_PRESS_TIMEOUT_MS = 220; // 多击防抖超时
 
     /**
-     * Entry point invoked when system_server is initializing.
+     * system_server 正在初始化时调用的入口。
      *
-     * @param param SystemServerStartingParam provided by Xposed framework containing class loader.
+     * @param param Xposed 框架提供的 SystemServerStartingParam，其中包含 ClassLoader。
      */
     @Override
     public void onSystemServerStarting(XposedModuleInterface.SystemServerStartingParam param) {
@@ -53,10 +38,10 @@ public class MainHook extends XposedModule {
         try {
             Class<?> pwmClass = classLoader.loadClass("com.android.server.policy.PhoneWindowManager");
 
-            // 1. Dynamic IPC Receiver Registration
+            // 1. 动态注册 IPC 接收器
             registerIpcReceiver(pwmClass);
 
-            // 2. Hook Power Button Handler
+            // 2. hook 电源键处理
             hookPowerButton(pwmClass, classLoader);
 
         } catch (Throwable t) {
@@ -65,86 +50,35 @@ public class MainHook extends XposedModule {
     }
 
     // =========================================================================
-    // 1. IPC Broadcast & State Synchronization
+    // 1. IPC 接收器 hook
     // =========================================================================
 
     /**
-     * Hooks PhoneWindowManager.init method to safely register the IPC BroadcastReceiver.
+     * hook PhoneWindowManager.init，以便在实例（及其系统 Context）就绪后注册 IPC 广播接收器。
      *
-     * @param pwmClass The PhoneWindowManager Class reference.
+     * @param pwmClass PhoneWindowManager 的 Class 引用。
      */
     private void registerIpcReceiver(Class<?> pwmClass) {
-        Method initMethod = findMethodByName(pwmClass, "init");
+        Method initMethod = ReflectUtils.findMethodByName(pwmClass, "init");
         if (initMethod == null) return;
-
         initMethod.setAccessible(true);
         hook(initMethod).intercept(chain -> {
             Object result = chain.proceed();
             Object pwmInstance = chain.getThisObject();
-
-            if (pwmInstance != null) {
-                setupReceiver(pwmClass, pwmInstance);
-            }
+            FakeScreenIpc.attach(this, pwmClass, pwmInstance);
             return result;
         });
     }
 
-    /**
-     * Extracts system Context and registers the BroadcastReceiver for toggle actions.
-     *
-     * @param pwmClass    The PhoneWindowManager Class reference.
-     * @param pwmInstance The PhoneWindowManager object instance.
-     */
-    private void setupReceiver(Class<?> pwmClass, Object pwmInstance) {
-        try {
-            Context systemContext = getSystemContextFromPwm(pwmClass, pwmInstance);
-
-            if (systemContext != null) {
-                // Reset Settings.Global to disabled state on boot
-                Settings.Global.putInt(systemContext.getContentResolver(), MainActivity.KEY_FAKE_SCREEN_ENABLED, 0);
-
-                IntentFilter filter = new IntentFilter(MainActivity.ACTION_TOGGLE_FAKE_SCREEN);
-                BroadcastReceiver receiver = new BroadcastReceiver() {
-                    @Override
-                    public void onReceive(Context context, Intent intent) {
-                        boolean enabled = intent.getBooleanExtra("enabled", false);
-                        sIsFakeScreenEnabled = enabled;
-
-                        try {
-                            Settings.Global.putInt(
-                                    context.getContentResolver(),
-                                    MainActivity.KEY_FAKE_SCREEN_ENABLED,
-                                    enabled ? 1 : 0
-                            );
-                        } catch (Throwable t) {
-                            log(Log.ERROR, TAG, "Failed to write Settings.Global in system_server", t);
-                        }
-                    }
-                };
-
-                ContextCompat.registerReceiver(
-                        systemContext,
-                        receiver,
-                        filter,
-                        ContextCompat.RECEIVER_EXPORTED
-                );
-            } else {
-                log(Log.ERROR, TAG, "Failed to extract Context from PhoneWindowManager");
-            }
-        } catch (Throwable t) {
-            log(Log.ERROR, TAG, "Failed to register BroadcastReceiver", t);
-        }
-    }
-
     // =========================================================================
-    // 2. Power Button Hook & Single Press Interception
+    // 2. 电源键 hook 与单击拦截
     // =========================================================================
 
     /**
-     * Hooks the powerPress method in PhoneWindowManager to intercept single press gestures.
+     * hook PhoneWindowManager 中的 powerPress 方法，以拦截单击手势。
      *
-     * @param pwmClass    The PhoneWindowManager Class reference.
-     * @param classLoader The ClassLoader used to load system classes.
+     * @param pwmClass    PhoneWindowManager 的 Class 引用。
+     * @param classLoader 用于加载系统类的 ClassLoader。
      */
     private void hookPowerButton(Class<?> pwmClass, ClassLoader classLoader) {
         Method powerPress = findPowerPressMethod(pwmClass);
@@ -155,29 +89,29 @@ public class MainHook extends XposedModule {
         powerPress.setAccessible(true);
 
         hook(powerPress).intercept(chain -> {
-            if (!sIsFakeScreenEnabled) {
+            if (!FakeScreenIpc.isEnabled()) {
                 return chain.proceed();
             }
 
             int count = extractClickCount(chain.getArgs());
 
-            // Bypass multi-press gestures (e.g., double press to launch camera)
+            // 放行多击手势（例如双击启动相机）
             if (count > 1) {
                 cancelPendingPowerTask();
-                mTargetPowerMode = POWER_MODE_OFF;
+                DisplayPowerControl.resetTargetMode();
                 return chain.proceed();
             }
 
-            // Intercept single power press
+            // 拦截单击电源键
             if (count == 1) {
                 cancelPendingPowerTask();
                 mPendingPowerTask = () -> {
-                    toggleDisplayPower(classLoader);
+                    DisplayPowerControl.toggle(this, classLoader);
                     mPendingPowerTask = null;
                 };
 
                 mHandler.postDelayed(mPendingPowerTask, MULTI_PRESS_TIMEOUT_MS);
-                return null; // Intercept native lock & sleep behavior
+                return null; // 拦截系统原生的锁屏与休眠行为
             }
 
             return chain.proceed();
@@ -185,36 +119,7 @@ public class MainHook extends XposedModule {
     }
 
     /**
-     * Toggles screen power mode using hardware-level SurfaceControl APIs.
-     *
-     * @param classLoader The ClassLoader used to resolve SurfaceControl and display tokens.
-     */
-    private void toggleDisplayPower(ClassLoader classLoader) {
-        IBinder displayBinder = getUniversalDisplayBinder(classLoader);
-        if (displayBinder == null) {
-            log(Log.ERROR, TAG, "DisplayBinder is null, skipping display power mode toggle");
-            return;
-        }
-
-        try {
-            Class<?> surfaceControlClass = classLoader.loadClass("android.view.SurfaceControl");
-            @SuppressLint("SoonBlockedPrivateApi")
-            Method setDisplayPowerMode = surfaceControlClass.getDeclaredMethod(
-                    "setDisplayPowerMode", IBinder.class, int.class);
-            setDisplayPowerMode.setAccessible(true);
-
-            // Direct SurfaceControl display power toggle
-            setDisplayPowerMode.invoke(null, displayBinder, mTargetPowerMode);
-
-            // Flip target power mode
-            mTargetPowerMode = (mTargetPowerMode == POWER_MODE_OFF) ? POWER_MODE_NORMAL : POWER_MODE_OFF;
-        } catch (Throwable t) {
-            log(Log.ERROR, TAG, "Failed to invoke setDisplayPowerMode", t);
-        }
-    }
-
-    /**
-     * Cancels any pending delayed power press tasks in the Handler queue.
+     * 取消 Handler 队列中待执行的电源键延时任务。
      */
     private void cancelPendingPowerTask() {
         if (mPendingPowerTask != null) {
@@ -224,10 +129,10 @@ public class MainHook extends XposedModule {
     }
 
     /**
-     * Extracts click count integer from method argument list.
+     * 从方法参数列表中取出点击次数。
      *
-     * @param args The method argument list captured during invocation.
-     * @return The click count if present, or 1 as default.
+     * @param args 调用时捕获的方法参数列表。
+     * @return 找到的点击次数，没有则返回 1。
      */
     private int extractClickCount(List<Object> args) {
         for (Object arg : args) {
@@ -238,31 +143,11 @@ public class MainHook extends XposedModule {
         return 1;
     }
 
-    // =========================================================================
-    // 3. Reflection Helpers
-    // =========================================================================
-
     /**
-     * Finds a declared method by name without parameter matching.
+     * 在 PhoneWindowManager 中查找参数签名匹配的 powerPress 方法。
      *
-     * @param clazz Target class to inspect.
-     * @param name  Method name.
-     * @return Matching Method object or null if not found.
-     */
-    private static Method findMethodByName(Class<?> clazz, String name) {
-        for (Method m : clazz.getDeclaredMethods()) {
-            if (name.equals(m.getName())) {
-                return m;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Finds a powerPress method in PhoneWindowManager with matching parameter signature.
-     *
-     * @param pwmClass Target PhoneWindowManager Class reference.
-     * @return Matching powerPress Method or null if not found.
+     * @param pwmClass 目标 PhoneWindowManager 的 Class 引用。
+     * @return 匹配的 powerPress Method，未找到时返回 null。
      */
     private static Method findPowerPressMethod(Class<?> pwmClass) {
         for (Method method : pwmClass.getDeclaredMethods()) {
@@ -273,83 +158,6 @@ public class MainHook extends XposedModule {
                 }
             }
         }
-        return null;
-    }
-
-    /**
-     * Safely extracts Context from PhoneWindowManager instance via field reflection or method invocation.
-     *
-     * @param pwmClass    PhoneWindowManager Class reference.
-     * @param pwmInstance PhoneWindowManager object instance.
-     * @return System Context object if resolved, null otherwise.
-     */
-    private static Context getSystemContextFromPwm(Class<?> pwmClass, Object pwmInstance) {
-        Class<?> currentClass = pwmClass;
-        while (currentClass != null && currentClass != Object.class) {
-            try {
-                Field field = currentClass.getDeclaredField("mContext");
-                field.setAccessible(true);
-                Object ctx = field.get(pwmInstance);
-                if (ctx instanceof Context) {
-                    return (Context) ctx;
-                }
-            } catch (Throwable ignored) {}
-            currentClass = currentClass.getSuperclass();
-        }
-
-        try {
-            Method getContextMethod = pwmClass.getDeclaredMethod("getContext");
-            getContextMethod.setAccessible(true);
-            Object ctx = getContextMethod.invoke(pwmInstance);
-            if (ctx instanceof Context) {
-                return (Context) ctx;
-            }
-        } catch (Throwable ignored) {}
-
-        return null;
-    }
-
-    /**
-     * Obtains physical display IBinder token across Android versions (Android 9 to 14+).
-     *
-     * @param classLoader The ClassLoader used to resolve framework classes.
-     * @return Physical display IBinder token or null if resolution fails.
-     */
-    private static IBinder getUniversalDisplayBinder(ClassLoader classLoader) {
-        int sdkInt = Build.VERSION.SDK_INT;
-
-        if (sdkInt >= 34) { // Android 14+
-            try {
-                Class<?> displayControl = classLoader.loadClass("com.android.server.display.DisplayControl");
-                Method getPhysicalDisplayIds = displayControl.getDeclaredMethod("getPhysicalDisplayIds");
-                getPhysicalDisplayIds.setAccessible(true);
-                long[] ids = (long[]) getPhysicalDisplayIds.invoke(null);
-                if (ids != null && ids.length > 0) {
-                    Method getPhysicalDisplayToken = displayControl.getDeclaredMethod("getPhysicalDisplayToken", long.class);
-                    getPhysicalDisplayToken.setAccessible(true);
-                    return (IBinder) getPhysicalDisplayToken.invoke(null, ids[0]);
-                }
-            } catch (Throwable ignored) {}
-        }
-
-        if (sdkInt >= 29) { // Android 10 ~ 13
-            try {
-                Class<?> surfaceControl = classLoader.loadClass("android.view.SurfaceControl");
-                @SuppressLint("BlockedPrivateApi")
-                Method getInternalDisplayToken = surfaceControl.getDeclaredMethod("getInternalDisplayToken");
-                getInternalDisplayToken.setAccessible(true);
-                IBinder token = (IBinder) getInternalDisplayToken.invoke(null);
-                if (token != null) return token;
-            } catch (Throwable ignored) {}
-        }
-
-        try { // Android 9 (API 28)
-            Class<?> surfaceControl = classLoader.loadClass("android.view.SurfaceControl");
-            Method getBuiltInDisplay = surfaceControl.getDeclaredMethod("getBuiltInDisplay", int.class);
-            getBuiltInDisplay.setAccessible(true);
-            return (IBinder) getBuiltInDisplay.invoke(null, 0);
-        } catch (Throwable ignored) {}
-
         return null;
     }
 }

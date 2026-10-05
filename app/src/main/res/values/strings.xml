@@ -7,4 +7,13 @@
     <string name="tip">模块激活并开启功能开关后，按下电源键将仅熄灭屏幕。</string>
     <string name="dialog_tips_title">使用提示</string>
     <string name="dialog_positive_btn">确定</string>
+
+    <!-- 主界面 -->
+    <string name="home_title">fakeScreen</string>
+    <string name="section_feature_toggle">功能开关</string>
+    <string name="section_hide_icon">隐藏桌面图标</string>
+    <string name="section_version_info">版本信息</string>
+    <string name="action_github_repo">GitHub仓库</string>
+    <string name="action_usage_tips">使用提示</string>
+    <string name="toast_browser_unavailable">Unable to open browser</string>
 </resources>
