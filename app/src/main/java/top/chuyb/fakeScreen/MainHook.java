@@ -1,5 +1,6 @@
 package top.chuyb.fakeScreen;
 
+import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -25,6 +26,7 @@ public class MainHook extends XposedModule {
     private static Runnable mPendingPowerTask = null;
     private static final long MULTI_PRESS_TIMEOUT_MS = 220; // 多击防抖超时
 
+    private final String PREFS_NAME ="FakeScreenSetting";
     /**
      * system_server 正在初始化时调用的入口。
      *
@@ -34,16 +36,21 @@ public class MainHook extends XposedModule {
     public void onSystemServerStarting(XposedModuleInterface.SystemServerStartingParam param) {
         super.onSystemServerStarting(param);
         ClassLoader classLoader = param.getClassLoader();
-
         try {
             Class<?> pwmClass = classLoader.loadClass("com.android.server.policy.PhoneWindowManager");
-
             // 1. 动态注册 IPC 接收器
             registerIpcReceiver(pwmClass);
-
             // 2. hook 电源键处理
             hookPowerButton(pwmClass, classLoader);
-
+            //3. 初始化兼容模式设置
+            SharedPreferences remotePreferences = getRemotePreferences(PREFS_NAME);
+            DisplayPowerControl.useCompatibilityMode =remotePreferences.getBoolean("CompatibilityMode",false);
+            //4. 注册监听器
+            remotePreferences.registerOnSharedPreferenceChangeListener((sharedPreferences, key) -> {
+                if(key.equals("CompatibilityMode")){
+                    DisplayPowerControl.useCompatibilityMode=sharedPreferences.getBoolean("CompatibilityMode",false);
+                }
+            });
         } catch (Throwable t) {
             log(Log.ERROR, TAG, "MainHook initialization error: " + Log.getStackTraceString(t));
         }
@@ -101,12 +108,16 @@ public class MainHook extends XposedModule {
                 DisplayPowerControl.resetTargetMode();
                 return chain.proceed();
             }
-
             // 拦截单击电源键
             if (count == 1) {
                 cancelPendingPowerTask();
                 mPendingPowerTask = () -> {
-                    DisplayPowerControl.toggle(this, classLoader);
+                    try {
+                        DisplayPowerControl.toggle(this, classLoader);
+                    } catch (Exception e){
+                        log(Log.ERROR,TAG,"An exception occurred while switching the screen’s power mode.",e);
+                        return;
+                    }
                     mPendingPowerTask = null;
                 };
 

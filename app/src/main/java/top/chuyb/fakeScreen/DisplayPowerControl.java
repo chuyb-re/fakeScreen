@@ -4,17 +4,21 @@ import android.annotation.SuppressLint;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
-
 import io.github.libxposed.api.XposedModule;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 通过硬件层 SurfaceControl 接口控制显示屏电源模式。本类不安装任何 hook，
  * hook 层只调用 {@link #toggle(XposedModule, ClassLoader)} 与 {@link #resetTargetMode()}。
  *
- * @since 1.0
  * @author chuyb-re
+ * @since 1.0
  */
 final class DisplayPowerControl {
 
@@ -22,7 +26,9 @@ final class DisplayPowerControl {
 
     private static final int POWER_MODE_OFF = 0;    // 熄屏
     private static final int POWER_MODE_NORMAL = 2; // 亮屏
-    private static volatile int sTargetPowerMode = POWER_MODE_OFF;
+    private static final AtomicInteger sTargetPowerMode = new AtomicInteger(POWER_MODE_OFF);
+    public static boolean useCompatibilityMode = false;
+
 
     private DisplayPowerControl() {
         // 工具类，禁止实例化。
@@ -32,7 +38,7 @@ final class DisplayPowerControl {
      * 复位待切换的电源模式，使下一次切换执行熄屏。
      */
     static void resetTargetMode() {
-        sTargetPowerMode = POWER_MODE_OFF;
+        sTargetPowerMode.set(POWER_MODE_OFF);
     }
 
     /**
@@ -41,28 +47,83 @@ final class DisplayPowerControl {
      * @param module      用于框架日志的模块实例。
      * @param classLoader 用于解析 SurfaceControl 与显示 token 的 ClassLoader。
      */
-    static void toggle(XposedModule module, ClassLoader classLoader) {
+    static void toggle(XposedModule module, ClassLoader classLoader) throws IOException, ClassNotFoundException, InvocationTargetException, NoSuchMethodException, IllegalAccessException {
         IBinder displayBinder = getUniversalDisplayBinder(classLoader);
         if (displayBinder == null) {
             module.log(Log.ERROR, TAG, "DisplayBinder is null, skipping display power mode toggle");
             return;
         }
-
-        try {
-            Class<?> surfaceControlClass = classLoader.loadClass("android.view.SurfaceControl");
-            @SuppressLint("SoonBlockedPrivateApi")
-            Method setDisplayPowerMode = surfaceControlClass.getDeclaredMethod(
-                    "setDisplayPowerMode", IBinder.class, int.class);
-            setDisplayPowerMode.setAccessible(true);
-
-            // 直接调用 SurfaceControl 切换显示电源模式
-            setDisplayPowerMode.invoke(null, displayBinder, sTargetPowerMode);
-
-            // 翻转下一次的目标电源模式
-            sTargetPowerMode = (sTargetPowerMode == POWER_MODE_OFF) ? POWER_MODE_NORMAL : POWER_MODE_OFF;
-        } catch (Throwable t) {
-            module.log(Log.ERROR, TAG, "Failed to invoke setDisplayPowerMode", t);
+        if (useCompatibilityMode) {
+            doToggleInCompatibilityMode(classLoader, displayBinder);
+        } else {
+            doToggle(classLoader, displayBinder);
         }
+
+
+        sTargetPowerMode.set(sTargetPowerMode.get() == POWER_MODE_NORMAL ? POWER_MODE_OFF : POWER_MODE_NORMAL);
+    }
+
+    /**
+     * 使用普通模式切换电源模式
+     */
+    private static void doToggle(ClassLoader classLoader, IBinder displayBinder) throws ClassNotFoundException, InvocationTargetException, NoSuchMethodException, IllegalAccessException {
+        setDisplayPowerMode(sTargetPowerMode.get(), classLoader, displayBinder);
+    }
+
+    /**
+     * 使用兼容模式切换电源模式，防止由于其他因素修改导致变量翻转失效
+     */
+    private static void doToggleInCompatibilityMode(ClassLoader classLoader, IBinder displayBinder) throws IOException, ClassNotFoundException, InvocationTargetException, NoSuchMethodException, IllegalAccessException {
+        int targetPowerMode = -1;
+        //通过硬件层获取当前屏幕状态
+        Process process;
+        try {
+            process = Runtime.getRuntime().exec("dumpsys SurfaceFlinger");
+        } catch (SecurityException e) {
+            doToggle(classLoader, displayBinder);
+            return;
+        }
+        //读取屏幕信息并切换状态
+        try (BufferedReader br = new BufferedReader(
+                new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.contains("powerMode=On")) {
+                    targetPowerMode = POWER_MODE_OFF;
+                    break;
+                }
+
+                if (line.contains("powerMode=Off")) {
+                    targetPowerMode = POWER_MODE_NORMAL;
+                    break;
+                }
+            }
+        }
+        process.destroy();
+        //获取失败进行降级
+        if (targetPowerMode == -1) {
+            doToggle(classLoader, displayBinder);
+        } else {
+            setDisplayPowerMode(targetPowerMode, classLoader, displayBinder);
+        }
+
+    }
+
+    /**
+     * 切换屏幕电源模式
+     *
+     * @param targetPowerMode 目标电源模式，参考{@link POWER_MODE_OFF}与{@link POWER_MODE_NORMAL}
+     * @param classLoader     使用的类加载器，需能够访问私有api
+     * @param displayBinder   目标屏幕binder
+     */
+    private static void setDisplayPowerMode(int targetPowerMode, ClassLoader classLoader, IBinder displayBinder) throws ClassNotFoundException, NoSuchMethodException, InvocationTargetException, IllegalAccessException {
+        Class<?> surfaceControlClass = classLoader.loadClass("android.view.SurfaceControl");
+        @SuppressLint("SoonBlockedPrivateApi")
+        Method setDisplayPowerMode = surfaceControlClass.getDeclaredMethod(
+                "setDisplayPowerMode", IBinder.class, int.class);
+        setDisplayPowerMode.setAccessible(true);
+        // 直接调用 SurfaceControl 切换显示电源模式
+        setDisplayPowerMode.invoke(null, displayBinder, targetPowerMode);
     }
 
     /**
@@ -76,7 +137,7 @@ final class DisplayPowerControl {
 
         if (sdkInt >= 34) { // Android 14+
             try {
-                Class<?> displayControl = classLoader.loadClass("com.android.server.display.DisplayControl");
+                @SuppressLint("PrivateApi") Class<?> displayControl = classLoader.loadClass("com.android.server.display.DisplayControl");
                 Method getPhysicalDisplayIds = displayControl.getDeclaredMethod("getPhysicalDisplayIds");
                 getPhysicalDisplayIds.setAccessible(true);
                 long[] ids = (long[]) getPhysicalDisplayIds.invoke(null);
@@ -85,7 +146,8 @@ final class DisplayPowerControl {
                     getPhysicalDisplayToken.setAccessible(true);
                     return (IBinder) getPhysicalDisplayToken.invoke(null, ids[0]);
                 }
-            } catch (Throwable ignored) {}
+            } catch (Throwable ignored) {
+            }
         }
 
         if (sdkInt >= 29) { // Android 10 ~ 13
@@ -96,7 +158,8 @@ final class DisplayPowerControl {
                 getInternalDisplayToken.setAccessible(true);
                 IBinder token = (IBinder) getInternalDisplayToken.invoke(null);
                 if (token != null) return token;
-            } catch (Throwable ignored) {}
+            } catch (Throwable ignored) {
+            }
         }
 
         try { // Android 9 (API 28)
@@ -104,7 +167,8 @@ final class DisplayPowerControl {
             Method getBuiltInDisplay = surfaceControl.getDeclaredMethod("getBuiltInDisplay", int.class);
             getBuiltInDisplay.setAccessible(true);
             return (IBinder) getBuiltInDisplay.invoke(null, 0);
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {
+        }
 
         return null;
     }
