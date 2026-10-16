@@ -4,6 +4,7 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.Window;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 
@@ -33,6 +34,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         initSwitchButton();
         initHideIconButton();
+        initAutoScreenOffInput();
         initGithubButton();
         initTipsButton();
     }
@@ -68,6 +70,54 @@ public class MainActivity extends AppCompatActivity {
         switchBtn.setChecked(DesktopIconHelper.isHidden(this));
         switchBtn.setOnCheckedChangeListener((buttonView, isChecked) ->
                 DesktopIconHelper.applySetting(this, isChecked));
+    }
+
+    /**
+     * 绑定自动息屏时间输入框：读取当前配置，失焦或输入完成时保存。
+     * 0 表示永不自动息屏。
+     */
+    private void initAutoScreenOffInput() {
+        EditText et = findViewById(R.id.et_auto_screen_off);
+        if (et == null) return;
+
+        int current = FakeScreenState.getAutoScreenOffSeconds(this);
+        et.setText(String.valueOf(current));
+
+        et.setOnFocusChangeListener((v, hasFocus) -> {
+            if (!hasFocus) {
+                saveAutoScreenOffFromInput(et);
+            }
+        });
+
+        et.setOnEditorActionListener((v, actionId, event) -> {
+            saveAutoScreenOffFromInput(et);
+            et.clearFocus();
+            return true;
+        });
+    }
+
+    private void saveAutoScreenOffFromInput(EditText et) {
+        String text = et.getText() != null ? et.getText().toString().trim() : "";
+        if (text.isEmpty()) {
+            text = "0";
+            et.setText(text);
+        }
+        try {
+            int seconds = Integer.parseInt(text);
+            if (seconds < 0) {
+                Toast.makeText(this, R.string.toast_invalid_timeout, Toast.LENGTH_SHORT).show();
+                et.setText(String.valueOf(FakeScreenState.getAutoScreenOffSeconds(this)));
+                return;
+            }
+            int previous = FakeScreenState.getAutoScreenOffSeconds(this);
+            if (seconds != previous) {
+                FakeScreenState.setAutoScreenOffSeconds(this, seconds);
+                Toast.makeText(this, R.string.toast_timeout_saved, Toast.LENGTH_SHORT).show();
+            }
+        } catch (NumberFormatException e) {
+            Toast.makeText(this, R.string.toast_invalid_timeout, Toast.LENGTH_SHORT).show();
+            et.setText(String.valueOf(FakeScreenState.getAutoScreenOffSeconds(this)));
+        }
     }
 
     /**
