@@ -42,11 +42,27 @@ final class DisplayPowerControl {
     }
 
     /**
-     * 通过硬件层 SurfaceControl 接口切换屏幕电源模式。
-     *
-     * @param module      用于框架日志的模块实例。
-     * @param classLoader 用于解析 SurfaceControl 与显示 token 的 ClassLoader。
+     * 强制熄屏（不经过系统休眠/锁屏路径），并令下一次 toggle 执行亮屏。
      */
+    static void forceOff(XposedModule module, ClassLoader classLoader) {
+        try {
+            IBinder displayBinder = getUniversalDisplayBinder(classLoader);
+            if (displayBinder == null) {
+                module.log(Log.ERROR, TAG, "DisplayBinder is null, skipping forceOff");
+                return;
+            }
+            setDisplayPowerMode(POWER_MODE_OFF, classLoader, displayBinder);
+            sTargetPowerMode.set(POWER_MODE_NORMAL);
+        } catch (Throwable t) {
+            module.log(Log.ERROR, TAG, "forceOff failed", t);
+        }
+    }
+
+    /** 当前内部状态是否认为下一动作应为亮屏（即上一动作已熄屏）。 */
+    static boolean isExpectingOn() {
+        return sTargetPowerMode.get() == POWER_MODE_NORMAL;
+    }
+
     static void toggle(XposedModule module, ClassLoader classLoader) throws IOException, ClassNotFoundException, InvocationTargetException, NoSuchMethodException, IllegalAccessException {
         IBinder displayBinder = getUniversalDisplayBinder(classLoader);
         if (displayBinder == null) {
@@ -84,8 +100,7 @@ final class DisplayPowerControl {
             return;
         }
         //读取屏幕信息并切换状态
-        try (BufferedReader br = new BufferedReader(
-                new InputStreamReader(process.getInputStream()))) {
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
             String line;
             while ((line = br.readLine()) != null) {
                 if (line.contains("powerMode=On")) {
@@ -119,8 +134,7 @@ final class DisplayPowerControl {
     private static void setDisplayPowerMode(int targetPowerMode, ClassLoader classLoader, IBinder displayBinder) throws ClassNotFoundException, NoSuchMethodException, InvocationTargetException, IllegalAccessException {
         Class<?> surfaceControlClass = classLoader.loadClass("android.view.SurfaceControl");
         @SuppressLint("SoonBlockedPrivateApi")
-        Method setDisplayPowerMode = surfaceControlClass.getDeclaredMethod(
-                "setDisplayPowerMode", IBinder.class, int.class);
+        Method setDisplayPowerMode = surfaceControlClass.getDeclaredMethod("setDisplayPowerMode", IBinder.class, int.class);
         setDisplayPowerMode.setAccessible(true);
         // 直接调用 SurfaceControl 切换显示电源模式
         setDisplayPowerMode.invoke(null, displayBinder, targetPowerMode);
@@ -169,7 +183,7 @@ final class DisplayPowerControl {
             return (IBinder) getBuiltInDisplay.invoke(null, 0);
         } catch (Throwable ignored) {
         }
-
+        
         return null;
     }
 }

@@ -22,9 +22,12 @@ import io.github.libxposed.api.XposedModule;
 final class FakeScreenIpc {
 
     private static final String TAG = "FakeScreen";
+    private static final String KEY_OLD_SCREEN_OFF_TIMEOUT = "old_screen_off_timeout";
+    private static final int NO_SAVED_TIMEOUT = -1;
 
     private static Context sSystemContext = null;
     private static volatile boolean sIsFakeScreenEnabled = false;
+    private static volatile int sAutoScreenOffSeconds = 0;
 
     private FakeScreenIpc() {
         // 工具类，禁止实例化。
@@ -44,6 +47,11 @@ final class FakeScreenIpc {
      *
      * @return 捕获到的 Context；{@link #attach} 尚未执行时返回 null。
      */
+
+    static int getAutoScreenOffSeconds() {
+        return sAutoScreenOffSeconds;
+    }
+
     static Context getSystemContext() {
         return sSystemContext;
     }
@@ -58,7 +66,7 @@ final class FakeScreenIpc {
     static void attach(XposedModule module, Class<?> pwmClass, Object pwmInstance) {
         sSystemContext = ReflectUtils.getSystemContext(pwmClass, pwmInstance);
         if (pwmInstance == null) return;
-        registerToggleReceiver(module);
+        registerReceivers(module);
     }
 
     /**
@@ -67,34 +75,67 @@ final class FakeScreenIpc {
      *
      * @param module 用于框架日志的模块实例。
      */
-    private static void registerToggleReceiver(XposedModule module) {
+    private static void registerReceivers(XposedModule module) {
         try {
             if (sSystemContext != null) {
-                // 开机时把 Settings.Global 复位为关闭状态
+                // 清理旧版本遗留的保存值，避免曾经开启模块时系统超时一直处于“永不”状态。
+                restoreLegacyScreenTimeout(module);
+
                 Settings.Global.putInt(sSystemContext.getContentResolver(), FakeScreenState.KEY_FAKE_SCREEN_ENABLED, 0);
 
-                // 开机后功能处于关闭状态，因此这里还原上一次会话遗留的超时覆盖，
-                // 避免屏幕一直保持不自动熄灭。
-                applyScreenTimeout(module, false);
+                try {
+                    sAutoScreenOffSeconds = Settings.Global.getInt(
+                            sSystemContext.getContentResolver(),
+                            FakeScreenState.KEY_AUTO_SCREEN_OFF_SECONDS,
+                            0);
+                } catch (Throwable ignored) {
+                    sAutoScreenOffSeconds = 0;
+                }
+                AutoScreenOffScheduler.setSeconds(sAutoScreenOffSeconds);
+                applySideEffects(false);
 
-                IntentFilter filter = new IntentFilter(FakeScreenState.ACTION_TOGGLE_FAKE_SCREEN);
+                IntentFilter filter = new IntentFilter();
+                filter.addAction(FakeScreenState.ACTION_TOGGLE_FAKE_SCREEN);
+                filter.addAction(FakeScreenState.ACTION_AUTO_SCREEN_OFF_CHANGED);
+
                 BroadcastReceiver receiver = new BroadcastReceiver() {
                     @Override
                     public void onReceive(Context context, Intent intent) {
-                        boolean enabled = intent.getBooleanExtra(FakeScreenState.EXTRA_ENABLED, false);
-                        sIsFakeScreenEnabled = enabled;
+                        String action = intent.getAction();
+                        if (FakeScreenState.ACTION_TOGGLE_FAKE_SCREEN.equals(action)) {
+                            boolean enabled = intent.getBooleanExtra(FakeScreenState.EXTRA_ENABLED, false);
+                            sIsFakeScreenEnabled = enabled;
 
-                        try {
-                            Settings.Global.putInt(
-                                    context.getContentResolver(),
-                                    FakeScreenState.KEY_FAKE_SCREEN_ENABLED,
-                                    enabled ? 1 : 0
-                            );
-                        } catch (Throwable t) {
-                            module.log(Log.ERROR, TAG, "Failed to write Settings.Global in system_server", t);
+                            try {
+                                Settings.Global.putInt(
+                                        context.getContentResolver(),
+                                        FakeScreenState.KEY_FAKE_SCREEN_ENABLED,
+                                        enabled ? 1 : 0
+                                );
+                            } catch (Throwable t) {
+                                module.log(Log.ERROR, TAG, "Failed to write Settings.Global in system_server", t);
+                            }
+
+                            applySideEffects(enabled);
+                        } else if (FakeScreenState.ACTION_AUTO_SCREEN_OFF_CHANGED.equals(action)) {
+                            int seconds = intent.getIntExtra(FakeScreenState.EXTRA_AUTO_SCREEN_OFF_SECONDS, 0);
+                            if (seconds < 0) {
+                                seconds = 0;
+                            }
+                            sAutoScreenOffSeconds = seconds;
+
+                            try {
+                                Settings.Global.putInt(
+                                        context.getContentResolver(),
+                                        FakeScreenState.KEY_AUTO_SCREEN_OFF_SECONDS,
+                                        seconds
+                                );
+                            } catch (Throwable t) {
+                                module.log(Log.ERROR, TAG, "Failed to write auto screen off seconds", t);
+                            }
+
+                            AutoScreenOffScheduler.setSeconds(seconds);
                         }
-
-                        applyScreenTimeout(module, enabled);
                     }
                 };
 
@@ -112,22 +153,27 @@ final class FakeScreenIpc {
         }
     }
 
-    /**
-     * 应用功能对应的屏幕超时副作用：功能开启时让屏幕永不自动熄灭，
-     * 功能关闭时还原用户原本设置的超时。
-     *
-     * @param module  用于框架日志的模块实例。
-     * @param enabled 当前开关状态。
-     */
-    private static void applyScreenTimeout(XposedModule module, boolean enabled) {
+    private static void restoreLegacyScreenTimeout(XposedModule module) {
         try {
-            if (enabled) {
-                ScreenTimeoutController.saveOldTimeOut();
-            } else {
-                ScreenTimeoutController.recoveryTimeOut();
-            }
+            if (sSystemContext == null) return;
+            android.content.ContentResolver resolver = sSystemContext.getContentResolver();
+            int saved = Settings.System.getInt(resolver, KEY_OLD_SCREEN_OFF_TIMEOUT, NO_SAVED_TIMEOUT);
+            if (saved == NO_SAVED_TIMEOUT) return;
+
+            Settings.System.putInt(resolver, Settings.System.SCREEN_OFF_TIMEOUT, saved);
+            Settings.System.putInt(resolver, KEY_OLD_SCREEN_OFF_TIMEOUT, NO_SAVED_TIMEOUT);
+            module.log(Log.INFO, TAG, "Restored screen timeout saved by an older version");
         } catch (Throwable t) {
-            module.log(Log.ERROR, TAG, "Failed to apply screen off timeout", t);
+            module.log(Log.ERROR, TAG, "Failed to restore legacy screen timeout", t);
         }
+    }
+
+    private static void applySideEffects(boolean enabled) {
+        if (enabled) {
+            ScreenTimeoutController.saveOldTimeOut();
+        } else {
+            ScreenTimeoutController.recoveryTimeOut();
+        }
+        AutoScreenOffScheduler.setEnabled(enabled);
     }
 }

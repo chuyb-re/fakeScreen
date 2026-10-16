@@ -39,16 +39,18 @@ public class MainHook extends XposedModule {
         try {
             Class<?> pwmClass = classLoader.loadClass("com.android.server.policy.PhoneWindowManager");
             // 1. 动态注册 IPC 接收器
+            AutoScreenOffScheduler.init(this, classLoader);
             registerIpcReceiver(pwmClass);
             // 2. hook 电源键处理
             hookPowerButton(pwmClass, classLoader);
             //3. 初始化兼容模式设置
+            hookUserActivity(classLoader);
             SharedPreferences remotePreferences = getRemotePreferences(PREFS_NAME);
-            DisplayPowerControl.useCompatibilityMode =remotePreferences.getBoolean("CompatibilityMode",false);
+            DisplayPowerControl.useCompatibilityMode = remotePreferences.getBoolean("CompatibilityMode", false);
             //4. 注册监听器
             remotePreferences.registerOnSharedPreferenceChangeListener((sharedPreferences, key) -> {
-                if(key.equals("CompatibilityMode")){
-                    DisplayPowerControl.useCompatibilityMode=sharedPreferences.getBoolean("CompatibilityMode",false);
+                if (key.equals("CompatibilityMode")) {
+                    DisplayPowerControl.useCompatibilityMode = sharedPreferences.getBoolean("CompatibilityMode", false);
                 }
             });
         } catch (Throwable t) {
@@ -87,6 +89,39 @@ public class MainHook extends XposedModule {
      * @param pwmClass    PhoneWindowManager 的 Class 引用。
      * @param classLoader 用于加载系统类的 ClassLoader。
      */
+
+    /**
+     * PowerManagerService 是触摸、按键等用户活动的统一入口。
+     * 每次用户活动都重置自动假息屏倒计时，避免操作过程中屏幕被定时熄灭。
+     */
+    private void hookUserActivity(ClassLoader classLoader) {
+        try {
+            Class<?> powerManagerService = classLoader.loadClass("com.android.server.power.PowerManagerService");
+            int hooked = 0;
+            for (Method method : powerManagerService.getDeclaredMethods()) {
+                if (!"userActivityInternal".equals(method.getName())) {
+                    continue;
+                }
+                method.setAccessible(true);
+                hook(method).intercept(chain -> {
+                    // Reset before PowerManagerService processes the event, so a callback
+                    // racing with the end of the timeout sees the latest activity first.
+                    AutoScreenOffScheduler.onUserActivity();
+                    return chain.proceed();
+                });
+                hooked++;
+            }
+            if (hooked == 0) {
+                log(Log.WARN, TAG, "PowerManagerService.userActivityInternal not found; auto screen-off timer cannot track user activity on this Android version");
+            } else {
+                log(Log.INFO, TAG, "Hooked " + hooked + " PowerManagerService user activity method(s)");
+            }
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "Failed to hook PowerManagerService user activity", t);
+        }
+    }
+
+
     private void hookPowerButton(Class<?> pwmClass, ClassLoader classLoader) {
         Method powerPress = findPowerPressMethod(pwmClass);
         if (powerPress == null) {
@@ -114,8 +149,9 @@ public class MainHook extends XposedModule {
                 mPendingPowerTask = () -> {
                     try {
                         DisplayPowerControl.toggle(this, classLoader);
-                    } catch (Exception e){
-                        log(Log.ERROR,TAG,"An exception occurred while switching the screen’s power mode.",e);
+                        AutoScreenOffScheduler.onDisplayToggled(DisplayPowerControl.isExpectingOn());
+                    } catch (Exception e) {
+                        log(Log.ERROR, TAG, "An exception occurred while switching the screen's power mode.", e);
                         return;
                     }
                     mPendingPowerTask = null;

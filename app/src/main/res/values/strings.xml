@@ -1,6 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">fakeScreen</string>
-    <string name="module_version">v2.0 (Build 20261005)</string>
+    <string name="module_version">v2.1 (Build 20261015)</string>
     <string name="xposeddescription">允许将电源按钮单击行为设置为仅熄屏</string>
     <string name="github_repo_url">https://github.com/chuyb-re/fakeScreen</string>
     <string name="help">https://github.com/chuyb-re/fakeScreen</string>
@@ -12,8 +13,12 @@
     <string name="home_title">fakeScreen</string>
     <string name="section_feature_toggle">功能开关</string>
     <string name="section_hide_icon">隐藏桌面图标</string>
+    <string name="section_auto_screen_off">自动息屏时间</string>
+    <string name="section_auto_screen_off_hint">单位：秒，0 为永不息屏</string>
     <string name="section_version_info">版本信息</string>
     <string name="action_github_repo">GitHub仓库</string>
     <string name="action_usage_tips">使用提示</string>
     <string name="toast_browser_unavailable">Unable to open browser</string>
+    <string name="toast_invalid_timeout">请输入有效的非负整数秒数</string>
+    <string name="toast_timeout_saved">自动息屏时间已保存</string>
 </resources>
