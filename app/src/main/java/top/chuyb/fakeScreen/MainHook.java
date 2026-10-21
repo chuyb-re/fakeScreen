@@ -20,13 +20,12 @@ import java.util.List;
  * @author chuyb-re
  */
 public class MainHook extends XposedModule {
-    private static final String TAG = "FakeScreen";
-
     private static final Handler mHandler = new Handler(Looper.getMainLooper());
     private static Runnable mPendingPowerTask = null;
     private static final long MULTI_PRESS_TIMEOUT_MS = 220; // 多击防抖超时
 
     private final String PREFS_NAME ="FakeScreenSetting";
+
     /**
      * system_server 正在初始化时调用的入口。
      *
@@ -35,6 +34,7 @@ public class MainHook extends XposedModule {
     @Override
     public void onSystemServerStarting(XposedModuleInterface.SystemServerStartingParam param) {
         super.onSystemServerStarting(param);
+        XLog.init(this);
         ClassLoader classLoader = param.getClassLoader();
         try {
             Class<?> pwmClass = classLoader.loadClass("com.android.server.policy.PhoneWindowManager");
@@ -47,12 +47,12 @@ public class MainHook extends XposedModule {
             DisplayPowerControl.useCompatibilityMode =remotePreferences.getBoolean("CompatibilityMode",false);
             //4. 注册监听器
             remotePreferences.registerOnSharedPreferenceChangeListener((sharedPreferences, key) -> {
-                if(key.equals("CompatibilityMode")){
+                if("CompatibilityMode".equals(key)){
                     DisplayPowerControl.useCompatibilityMode=sharedPreferences.getBoolean("CompatibilityMode",false);
                 }
             });
-        } catch (Throwable t) {
-            log(Log.ERROR, TAG, "MainHook initialization error: " + Log.getStackTraceString(t));
+        } catch (Exception e) {
+            XLog.error("MainHook initialization error",e);
         }
     }
 
@@ -90,7 +90,7 @@ public class MainHook extends XposedModule {
     private void hookPowerButton(Class<?> pwmClass, ClassLoader classLoader) {
         Method powerPress = findPowerPressMethod(pwmClass);
         if (powerPress == null) {
-            log(Log.ERROR, TAG, "Failed to find suitable powerPress method");
+            XLog.log(Log.ERROR,"Failed to find suitable powerPress method");
             return;
         }
         powerPress.setAccessible(true);
@@ -115,7 +115,7 @@ public class MainHook extends XposedModule {
                     try {
                         DisplayPowerControl.toggle(this, classLoader);
                     } catch (Exception e){
-                        log(Log.ERROR,TAG,"An exception occurred while switching the screen’s power mode.",e);
+                        XLog.error("An exception occurred while switching the screen’s power mode.",e);
                         return;
                     }
                     mPendingPowerTask = null;

@@ -21,7 +21,6 @@ import io.github.libxposed.api.XposedModule;
  */
 final class FakeScreenIpc {
 
-    private static final String TAG = "FakeScreen";
 
     private static Context sSystemContext = null;
     private static volatile boolean sIsFakeScreenEnabled = false;
@@ -90,10 +89,9 @@ final class FakeScreenIpc {
                                     FakeScreenState.KEY_FAKE_SCREEN_ENABLED,
                                     enabled ? 1 : 0
                             );
-                        } catch (Throwable t) {
-                            module.log(Log.ERROR, TAG, "Failed to write Settings.Global in system_server", t);
+                        } catch (Exception e) {
+                            XLog.error("Failed to write Settings.Global in system_server", e);
                         }
-
                         applyScreenTimeout(module, enabled);
                     }
                 };
@@ -104,11 +102,12 @@ final class FakeScreenIpc {
                         filter,
                         ContextCompat.RECEIVER_EXPORTED
                 );
+                XLog.log(Log.INFO,"Register BroadcastReceiver successful");
             } else {
-                module.log(Log.ERROR, TAG, "Failed to extract Context from PhoneWindowManager");
+                XLog.log(Log.ERROR,"Failed to extract Context from PhoneWindowManager");
             }
-        } catch (Throwable t) {
-            module.log(Log.ERROR, TAG, "Failed to register BroadcastReceiver", t);
+        } catch (Exception e) {
+            XLog.error("Failed to register BroadcastReceiver", e);
         }
     }
 
@@ -126,8 +125,8 @@ final class FakeScreenIpc {
             } else {
                 ScreenTimeoutController.recoveryTimeOut();
             }
-        } catch (Throwable t) {
-            module.log(Log.ERROR, TAG, "Failed to apply screen off timeout", t);
+        } catch (Exception e) {
+            XLog.error("Failed to apply screen off timeout", e);
         }
     }
 }

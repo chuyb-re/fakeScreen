@@ -21,9 +21,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  * @since 1.0
  */
 final class DisplayPowerControl {
-
-    private static final String TAG = "FakeScreen";
-
     private static final int POWER_MODE_OFF = 0;    // 熄屏
     private static final int POWER_MODE_NORMAL = 2; // 亮屏
     private static final AtomicInteger sTargetPowerMode = new AtomicInteger(POWER_MODE_OFF);
@@ -50,7 +47,7 @@ final class DisplayPowerControl {
     static void toggle(XposedModule module, ClassLoader classLoader) throws IOException, ClassNotFoundException, InvocationTargetException, NoSuchMethodException, IllegalAccessException {
         IBinder displayBinder = getUniversalDisplayBinder(classLoader);
         if (displayBinder == null) {
-            module.log(Log.ERROR, TAG, "DisplayBinder is null, skipping display power mode toggle");
+            XLog.log(Log.ERROR,"DisplayBinder is null, skipping display power mode toggle");
             return;
         }
         if (useCompatibilityMode) {
@@ -73,13 +70,13 @@ final class DisplayPowerControl {
     /**
      * 使用兼容模式切换电源模式，防止由于其他因素修改导致变量翻转失效
      */
-    private static void doToggleInCompatibilityMode(ClassLoader classLoader, IBinder displayBinder) throws IOException, ClassNotFoundException, InvocationTargetException, NoSuchMethodException, IllegalAccessException {
+    private static void doToggleInCompatibilityMode(ClassLoader classLoader, IBinder displayBinder) throws ClassNotFoundException, InvocationTargetException, NoSuchMethodException, IllegalAccessException, IOException {
         int targetPowerMode = -1;
         //通过硬件层获取当前屏幕状态
         Process process;
         try {
             process = Runtime.getRuntime().exec("dumpsys SurfaceFlinger");
-        } catch (SecurityException e) {
+        } catch (IOException e) {
             doToggle(classLoader, displayBinder);
             return;
         }

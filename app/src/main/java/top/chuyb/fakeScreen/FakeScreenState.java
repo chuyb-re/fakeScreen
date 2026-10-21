@@ -17,7 +17,6 @@ import android.util.Log;
  */
 public final class FakeScreenState {
 
-    private static final String TAG = "FakeScreen";
 
     /** 保存在 Settings.Global 中的功能开关状态键。 */
     public static final String KEY_FAKE_SCREEN_ENABLED = "FakeScreen_enable";
@@ -43,8 +42,8 @@ public final class FakeScreenState {
             int currentState = Settings.Global.getInt(
                     context.getContentResolver(), KEY_FAKE_SCREEN_ENABLED, 0);
             return currentState == 1;
-        } catch (Throwable e) {
-            Log.e(TAG, "Failed to read Settings.Global state", e);
+        } catch (Exception e) {
+            XLog.error("Failed to read Settings.Global state", e);
             return false;
         }
     }
