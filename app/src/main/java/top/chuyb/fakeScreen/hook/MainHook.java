@@ -1,4 +1,4 @@
-package top.chuyb.fakeScreen;
+package top.chuyb.fakeScreen.hook;
 
 import android.content.SharedPreferences;
 import android.os.Handler;
@@ -10,6 +10,13 @@ import io.github.libxposed.api.XposedModuleInterface;
 
 import java.lang.reflect.Method;
 import java.util.List;
+
+import top.chuyb.fakeScreen.core.Settings;
+import top.chuyb.fakeScreen.system.DisplayPowerControl;
+import top.chuyb.fakeScreen.system.FakeScreenIpc;
+import top.chuyb.fakeScreen.system.SystemContextManager;
+import top.chuyb.fakeScreen.util.ReflectUtils;
+import top.chuyb.fakeScreen.util.XLog;
 
 /**
  * Xposed 模块入口：安装 hook，并决定电源键被按下时如何处理。所有与 hook 无关的逻辑都放在各自的类中：
@@ -42,13 +49,12 @@ public class MainHook extends XposedModule {
             registerIpcReceiver(pwmClass);
             // 2. hook 电源键处理
             hookPowerButton(pwmClass, classLoader);
-            //3. 初始化兼容模式设置
+            // 3. 初始化兼容模式设置
             SharedPreferences remotePreferences = getRemotePreferences(PREFS_NAME);
-            DisplayPowerControl.useCompatibilityMode =remotePreferences.getBoolean("CompatibilityMode",false);
-            //4. 注册监听器
+            Settings.setCompatibilityModeOn(remotePreferences.getBoolean("CompatibilityMode", false));
             remotePreferences.registerOnSharedPreferenceChangeListener((sharedPreferences, key) -> {
-                if("CompatibilityMode".equals(key)){
-                    DisplayPowerControl.useCompatibilityMode=sharedPreferences.getBoolean("CompatibilityMode",false);
+                if ("CompatibilityMode".equals(key)) {
+                    Settings.setCompatibilityModeOn(sharedPreferences.getBoolean("CompatibilityMode", false));
                 }
             });
         } catch (Exception e) {
@@ -72,7 +78,11 @@ public class MainHook extends XposedModule {
         hook(initMethod).intercept(chain -> {
             Object result = chain.proceed();
             Object pwmInstance = chain.getThisObject();
-            FakeScreenIpc.attach(this, pwmClass, pwmInstance);
+            if (SystemContextManager.initialize(pwmClass, pwmInstance)) {
+                FakeScreenIpc.attach(this);
+            } else {
+                XLog.log(Log.ERROR, "Failed to extract Context from PhoneWindowManager");
+            }
             return result;
         });
     }
@@ -113,7 +123,9 @@ public class MainHook extends XposedModule {
                 cancelPendingPowerTask();
                 mPendingPowerTask = () -> {
                     try {
-                        DisplayPowerControl.toggle(this, classLoader);
+                        if(!DisplayPowerControl.toggle(this, classLoader)){
+                            return;
+                        }
                     } catch (Exception e){
                         XLog.error("An exception occurred while switching the screen’s power mode.",e);
                         return;
@@ -124,7 +136,6 @@ public class MainHook extends XposedModule {
                 mHandler.postDelayed(mPendingPowerTask, MULTI_PRESS_TIMEOUT_MS);
                 return null; // 拦截系统原生的锁屏与休眠行为
             }
-
             return chain.proceed();
         });
     }

@@ -1,9 +1,13 @@
-package top.chuyb.fakeScreen;
+package top.chuyb.fakeScreen.core;
 
 import android.content.Context;
 import android.content.Intent;
 import android.provider.Settings;
 import android.util.Log;
+
+import top.chuyb.fakeScreen.ui.MainActivity;
+import top.chuyb.fakeScreen.hook.MainHook;
+import top.chuyb.fakeScreen.util.XLog;
 
 /**
  * 假熄屏功能的业务层。

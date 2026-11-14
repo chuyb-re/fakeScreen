@@ -1,4 +1,4 @@
-package top.chuyb.fakeScreen;
+package top.chuyb.fakeScreen.util;
 
 import android.util.Log;
 import io.github.libxposed.api.XposedModule;

@@ -7,7 +7,7 @@
             android:theme="@style/Theme.FakeScreen"
              >
         <service
-                android:name=".FakeScreenTileService"
+                android:name=".ui.FakeScreenTileService"
                 android:label="FakeScreen"
                 android:icon="@drawable/tile"
                 android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
@@ -18,7 +18,7 @@
         </service>
 
         <activity
-                android:name=".LauncherActivity"
+                android:name=".ui.LauncherActivity"
                 android:exported="true"
                 android:excludeFromRecents="true"
                 android:theme="@android:style/Theme.Translucent.NoTitleBar">
@@ -30,7 +30,7 @@
 
 
         <activity
-                android:name=".MainActivity"
+                android:name=".ui.MainActivity"
                 android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

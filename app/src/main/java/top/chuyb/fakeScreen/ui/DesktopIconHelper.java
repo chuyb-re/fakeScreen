@@ -1,4 +1,4 @@
-package top.chuyb.fakeScreen;
+package top.chuyb.fakeScreen.ui;
 
 import android.content.ComponentName;
 import android.content.Context;
@@ -14,7 +14,7 @@ import android.content.pm.PackageManager;
  * @since 1.0
  * @author chuyb-re
  */
-final class DesktopIconHelper {
+public final class DesktopIconHelper {
 
     private DesktopIconHelper() {
         // 工具类，禁止实例化。
@@ -24,7 +24,7 @@ final class DesktopIconHelper {
      * @param context 任意可用的 Context。
      * @return 桌面图标当前是否已隐藏。
      */
-    static boolean isHidden(Context context) {
+    public static boolean isHidden(Context context) {
         int state = context.getPackageManager()
                 .getComponentEnabledSetting(launcherComponent(context));
         return state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED
@@ -37,7 +37,7 @@ final class DesktopIconHelper {
      * @param context 任意可用的 Context。
      * @param hide    true 表示隐藏桌面图标，false 表示重新显示。
      */
-    static void applySetting(Context context, boolean hide) {
+    public static void applySetting(Context context, boolean hide) {
         ComponentName component = launcherComponent(context);
         PackageManager pm = context.getPackageManager();
         int newState = hide

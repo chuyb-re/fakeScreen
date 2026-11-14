@@ -1,7 +1,6 @@
-package top.chuyb.fakeScreen;
+package top.chuyb.fakeScreen.system;
 
 import android.content.ContentResolver;
-import android.content.Context;
 import android.provider.Settings;
 
 /**
@@ -36,7 +35,7 @@ final class ScreenTimeoutController {
      * 因此重复收到开启事件也不会破坏用户原本的配置。</p>
      */
     static void saveOldTimeOut() {
-        ContentResolver cr = requireSystemContext().getContentResolver();
+        ContentResolver cr = SystemContextManager.requireSystemContext().getContentResolver();
         int saved = Settings.System.getInt(cr, KEY_OLD_SCREEN_OFF_TIMEOUT, NO_SAVED_TIMEOUT);
         int current = Settings.System.getInt(
                 cr, Settings.System.SCREEN_OFF_TIMEOUT, DEFAULT_SCREEN_OFF_TIMEOUT_MS);
@@ -54,7 +53,7 @@ final class ScreenTimeoutController {
      * <p>没有保存过任何值时不做任何操作，因此用户自己设置的“永不”不会被改动。</p>
      */
     static void recoveryTimeOut() {
-        ContentResolver cr = requireSystemContext().getContentResolver();
+        ContentResolver cr = SystemContextManager.requireSystemContext().getContentResolver();
         int saved = Settings.System.getInt(cr, KEY_OLD_SCREEN_OFF_TIMEOUT, NO_SAVED_TIMEOUT);
         if (saved == NO_SAVED_TIMEOUT) return;
 
@@ -63,15 +62,4 @@ final class ScreenTimeoutController {
         Settings.System.putInt(cr, KEY_OLD_SCREEN_OFF_TIMEOUT, NO_SAVED_TIMEOUT);
     }
 
-    /**
-     * @return 在 system_server 中捕获的系统 Context。
-     * @throws IllegalStateException 尚未捕获到 Context 时抛出。
-     */
-    private static Context requireSystemContext() {
-        Context context = FakeScreenIpc.getSystemContext();
-        if (context == null) {
-            throw new IllegalStateException("System context is not available yet");
-        }
-        return context;
-    }
 }

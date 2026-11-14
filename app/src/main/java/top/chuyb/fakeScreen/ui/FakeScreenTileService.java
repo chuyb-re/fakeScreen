@@ -1,7 +1,9 @@
-package top.chuyb.fakeScreen;
+package top.chuyb.fakeScreen.ui;
 
 import android.service.quicksettings.Tile;
 import android.service.quicksettings.TileService;
+
+import top.chuyb.fakeScreen.core.FakeScreenState;
 
 /**
  * 快捷设置磁贴，作用与界面上的功能开关一致。

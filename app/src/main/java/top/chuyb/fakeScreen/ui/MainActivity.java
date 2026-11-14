@@ -1,4 +1,4 @@
-package top.chuyb.fakeScreen;
+package top.chuyb.fakeScreen.ui;
 
 import android.content.Intent;
 import android.net.Uri;
@@ -11,6 +11,9 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.SwitchCompat;
 import androidx.core.view.WindowCompat;
+
+import top.chuyb.fakeScreen.R;
+import top.chuyb.fakeScreen.core.FakeScreenState;
 
 /**
  * 主界面（表现层）：只负责加载 XML 布局、设置窗口外观并分发用户交互事件，

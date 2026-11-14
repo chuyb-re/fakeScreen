@@ -1,4 +1,4 @@
-package top.chuyb.fakeScreen;
+package top.chuyb.fakeScreen.util;
 
 import android.content.Context;
 
@@ -11,7 +11,7 @@ import java.lang.reflect.Method;
  * @since 1.0
  * @author chuyb-re
  */
-final class ReflectUtils {
+public final class ReflectUtils {
 
     private ReflectUtils() {
         // 工具类，禁止实例化。
@@ -24,7 +24,7 @@ final class ReflectUtils {
      * @param name  方法名。
      * @return 匹配的 Method 对象，未找到时返回 null。
      */
-    static Method findMethodByName(Class<?> clazz, String name) {
+    public static Method findMethodByName(Class<?> clazz, String name) {
         for (Method m : clazz.getDeclaredMethods()) {
             if (name.equals(m.getName())) {
                 return m;
@@ -40,7 +40,7 @@ final class ReflectUtils {
      * @param pwmInstance PhoneWindowManager 实例对象。
      * @return 取到的系统 Context，取不到时返回 null。
      */
-    static Context getSystemContext(Class<?> pwmClass, Object pwmInstance) {
+    public static Context getSystemContext(Class<?> pwmClass, Object pwmInstance) {
         Class<?> currentClass = pwmClass;
         while (currentClass != null && currentClass != Object.class) {
             try {

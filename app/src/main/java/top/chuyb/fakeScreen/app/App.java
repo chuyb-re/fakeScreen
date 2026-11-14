@@ -1,4 +1,4 @@
-package top.chuyb.fakeScreen;
+package top.chuyb.fakeScreen.app;
 
 import android.app.Application;
 import android.content.SharedPreferences;

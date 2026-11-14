@@ -1,8 +1,11 @@
-package top.chuyb.fakeScreen;
+package top.chuyb.fakeScreen.system;
 
 import android.annotation.SuppressLint;
+import android.content.Context;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.PowerManager;
+import android.os.SystemClock;
 import android.util.Log;
 import io.github.libxposed.api.XposedModule;
 
@@ -13,6 +16,9 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import top.chuyb.fakeScreen.core.Settings;
+import top.chuyb.fakeScreen.util.XLog;
+
 /**
  * 通过硬件层 SurfaceControl 接口控制显示屏电源模式。本类不安装任何 hook，
  * hook 层只调用 {@link #toggle(XposedModule, ClassLoader)} 与 {@link #resetTargetMode()}。
@@ -20,11 +26,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  * @author chuyb-re
  * @since 1.0
  */
-final class DisplayPowerControl {
+public final class DisplayPowerControl {
     private static final int POWER_MODE_OFF = 0;    // 熄屏
     private static final int POWER_MODE_NORMAL = 2; // 亮屏
     private static final AtomicInteger sTargetPowerMode = new AtomicInteger(POWER_MODE_OFF);
-    public static boolean useCompatibilityMode = false;
 
 
     private DisplayPowerControl() {
@@ -34,7 +39,7 @@ final class DisplayPowerControl {
     /**
      * 复位待切换的电源模式，使下一次切换执行熄屏。
      */
-    static void resetTargetMode() {
+    public static void resetTargetMode() {
         sTargetPowerMode.set(POWER_MODE_OFF);
     }
 
@@ -43,30 +48,40 @@ final class DisplayPowerControl {
      *
      * @param module      用于框架日志的模块实例。
      * @param classLoader 用于解析 SurfaceControl 与显示 token 的 ClassLoader。
+     * @return 屏幕状态切换结果，当使用该方法切换屏幕状态后，返回true
      */
-    static void toggle(XposedModule module, ClassLoader classLoader) throws IOException, ClassNotFoundException, InvocationTargetException, NoSuchMethodException, IllegalAccessException {
+    public static boolean toggle(XposedModule module, ClassLoader classLoader) throws IOException, ClassNotFoundException, InvocationTargetException, NoSuchMethodException, IllegalAccessException {
         IBinder displayBinder = getUniversalDisplayBinder(classLoader);
         if (displayBinder == null) {
             XLog.log(Log.ERROR,"DisplayBinder is null, skipping display power mode toggle");
-            return;
+            return false;
         }
-        if (useCompatibilityMode) {
+        if (Settings.isCompatibilityModeOn()) {
             doToggleInCompatibilityMode(classLoader, displayBinder);
         } else {
-            doToggle(classLoader, displayBinder);
+            return doToggle(classLoader, displayBinder);
+
         }
-
-
         sTargetPowerMode.set(sTargetPowerMode.get() == POWER_MODE_NORMAL ? POWER_MODE_OFF : POWER_MODE_NORMAL);
+        return true;
     }
 
     /**
      * 使用普通模式切换电源模式
      */
-    private static void doToggle(ClassLoader classLoader, IBinder displayBinder) throws ClassNotFoundException, InvocationTargetException, NoSuchMethodException, IllegalAccessException {
+    private static boolean doToggle(ClassLoader classLoader, IBinder displayBinder) throws ClassNotFoundException, InvocationTargetException, NoSuchMethodException, IllegalAccessException {
+        if(sTargetPowerMode.get() == POWER_MODE_OFF) {
+            Context context=SystemContextManager.getSystemContext();
+            if(context != null) {
+                PowerManager pm  = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+                if(!pm.isInteractive()) {
+                    return false;
+                }
+            }
+        }
         setDisplayPowerMode(sTargetPowerMode.get(), classLoader, displayBinder);
+        return true;
     }
-
     /**
      * 使用兼容模式切换电源模式，防止由于其他因素修改导致变量翻转失效
      */
@@ -74,6 +89,7 @@ final class DisplayPowerControl {
         int targetPowerMode = -1;
         //通过硬件层获取当前屏幕状态
         Process process;
+
         try {
             process = Runtime.getRuntime().exec("dumpsys SurfaceFlinger");
         } catch (IOException e) {
@@ -114,6 +130,9 @@ final class DisplayPowerControl {
      * @param displayBinder   目标屏幕binder
      */
     private static void setDisplayPowerMode(int targetPowerMode, ClassLoader classLoader, IBinder displayBinder) throws ClassNotFoundException, NoSuchMethodException, InvocationTargetException, IllegalAccessException {
+        if(targetPowerMode==POWER_MODE_OFF){
+            ScreenTimeoutController.saveOldTimeOut();
+        }
         Class<?> surfaceControlClass = classLoader.loadClass("android.view.SurfaceControl");
         @SuppressLint("SoonBlockedPrivateApi")
         Method setDisplayPowerMode = surfaceControlClass.getDeclaredMethod(
@@ -121,6 +140,12 @@ final class DisplayPowerControl {
         setDisplayPowerMode.setAccessible(true);
         // 直接调用 SurfaceControl 切换显示电源模式
         setDisplayPowerMode.invoke(null, displayBinder, targetPowerMode);
+        if(targetPowerMode==POWER_MODE_NORMAL){
+            PowerManager powerManager= (PowerManager) SystemContextManager.requireSystemContext().getSystemService(Context.POWER_SERVICE);
+            Method method = classLoader.loadClass("android.os.PowerManager").getMethod("userActivity", long.class, int.class, int.class);
+            method.invoke(powerManager,SystemClock.uptimeMillis(),0,0);
+            ScreenTimeoutController.recoveryTimeOut();
+        }
     }
 
     /**

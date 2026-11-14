@@ -1,4 +1,4 @@
-package top.chuyb.fakeScreen;
+package top.chuyb.fakeScreen.ui;
 
 import android.app.Activity;
 import android.content.Intent;
