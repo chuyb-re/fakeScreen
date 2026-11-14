@@ -49,17 +49,28 @@ public class MainHook extends XposedModule {
             registerIpcReceiver(pwmClass);
             // 2. hook 电源键处理
             hookPowerButton(pwmClass, classLoader);
-            // 3. 初始化兼容模式设置
-            SharedPreferences remotePreferences = getRemotePreferences(PREFS_NAME);
-            Settings.setCompatibilityModeOn(remotePreferences.getBoolean("CompatibilityMode", false));
-            remotePreferences.registerOnSharedPreferenceChangeListener((sharedPreferences, key) -> {
-                if ("CompatibilityMode".equals(key)) {
-                    Settings.setCompatibilityModeOn(sharedPreferences.getBoolean("CompatibilityMode", false));
-                }
-            });
+            // 3. 初始化模块设置并监听后续变更
+            initializeSettings();
         } catch (Exception e) {
             XLog.error("MainHook initialization error",e);
         }
+    }
+
+    /**
+     * 从 Xposed 远程偏好中加载 Settings 的初始值，并保持运行时值同步。
+     */
+    private void initializeSettings() {
+        SharedPreferences remotePreferences = getRemotePreferences(PREFS_NAME);
+        Settings.setCompatibilityModeOn(remotePreferences.getBoolean("CompatibilityMode", false));
+        Settings.setDebugModeOn(remotePreferences.getBoolean("DebugMode", false));
+
+        remotePreferences.registerOnSharedPreferenceChangeListener((sharedPreferences, key) -> {
+            if ("CompatibilityMode".equals(key)) {
+                Settings.setCompatibilityModeOn(sharedPreferences.getBoolean("CompatibilityMode", false));
+            } else if ("DebugMode".equals(key)) {
+                Settings.setDebugModeOn(sharedPreferences.getBoolean("DebugMode", false));
+            }
+        });
     }
 
     // =========================================================================
