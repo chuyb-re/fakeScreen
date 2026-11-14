@@ -1,0 +1,15 @@
+[versions]
+agp = "9.1.0"
+xposed-api = "102.0.0"
+xposed-service = "102.0.0"
+core = "1.19.1"
+appcompat = "1.8.0"
+
+[plugins]
+agp-app = { id = "com.android.application", version.ref = "agp" }
+
+[libraries]
+libxposed-api = { group = "io.github.libxposed", name = "api", version.ref = "xposed-api" }
+libxposed-service = { group = "io.github.libxposed", name = "service", version.ref = "xposed-service" }
+core = { group = "androidx.core", name = "core", version.ref = "core" }
+appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
