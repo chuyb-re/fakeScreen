@@ -2,6 +2,7 @@ package top.chuyb.fakeScreen.system;
 
 import android.content.ContentResolver;
 import android.provider.Settings;
+import top.chuyb.fakeScreen.util.XLog;
 
 /**
  * 屏幕自动熄灭超时处理，与 hook 无关：功能开启时把屏幕设为永不自动熄灭，

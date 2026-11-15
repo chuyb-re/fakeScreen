@@ -1,5 +1,7 @@
 package top.chuyb.fakeScreen.hook;
 
+import android.app.KeyguardManager;
+import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -197,6 +199,11 @@ public class MainHook extends XposedModule {
                     return chain.proceed();
                 }
 
+                if (isKeyguardShowing()) {
+                    XLog.debug("powerPress: keyguard is showing; proceeding with system power handling");
+                    return chain.proceed();
+                }
+
                 try {
                     boolean toggled = DisplayPowerControl.toggle(this, classLoader);
                     XLog.debug("powerPress: display toggle result=" + toggled);
@@ -213,6 +220,33 @@ public class MainHook extends XposedModule {
             XLog.debug("powerPress: unsupported press count; proceeding with system handling");
             return chain.proceed();
         });
+    }
+
+    /**
+     * 锁屏显示期间让系统处理电源键，避免模块直接关闭显示器。
+     * 状态无法确认时也采用系统原生处理。
+     */
+    private boolean isKeyguardShowing() {
+        try {
+            Context context = SystemContextManager.getSystemContext();
+            if (context == null) {
+                XLog.debug("Keyguard check unavailable: system Context is null");
+                return true;
+            }
+
+            KeyguardManager keyguardManager = (KeyguardManager) context.getSystemService(Context.KEYGUARD_SERVICE);
+            if (keyguardManager == null) {
+                XLog.debug("Keyguard check unavailable: KeyguardManager is null");
+                return true;
+            }
+
+            boolean showing = keyguardManager.isKeyguardLocked();
+            XLog.debug("Keyguard state: showing=" + showing);
+            return showing;
+        } catch (Exception e) {
+            XLog.error("Failed to check keyguard state; using system power handling.", e);
+            return true;
+        }
     }
 
     /**
