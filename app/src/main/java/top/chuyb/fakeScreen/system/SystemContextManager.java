@@ -3,6 +3,7 @@ package top.chuyb.fakeScreen.system;
 import android.content.Context;
 
 import top.chuyb.fakeScreen.util.ReflectUtils;
+import top.chuyb.fakeScreen.util.XLog;
 
 /**
  * 持有 system_server 中可供模块各功能复用的系统 Context。
@@ -27,8 +28,12 @@ public final class SystemContextManager {
      */
     public static boolean initialize(Class<?> pwmClass, Object pwmInstance) {
         Context context = ReflectUtils.getSystemContext(pwmClass, pwmInstance);
-        if (context == null) return false;
+        if (context == null) {
+            XLog.debug("System Context capture failed from PhoneWindowManager");
+            return false;
+        }
         sSystemContext = context;
+        XLog.debug("System Context captured: " + context.getClass().getName());
         return true;
     }
 

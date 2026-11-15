@@ -10,7 +10,7 @@ import android.provider.Settings;
  * @since 1.0
  * @author chuyb-re
  */
-final class ScreenTimeoutController {
+public class ScreenTimeoutController {
 
     /** 保存被覆盖前的超时所使用的 Settings.System 键。 */
     private static final String KEY_OLD_SCREEN_OFF_TIMEOUT = "old_screen_off_timeout";
@@ -39,12 +39,14 @@ final class ScreenTimeoutController {
         int saved = Settings.System.getInt(cr, KEY_OLD_SCREEN_OFF_TIMEOUT, NO_SAVED_TIMEOUT);
         int current = Settings.System.getInt(
                 cr, Settings.System.SCREEN_OFF_TIMEOUT, DEFAULT_SCREEN_OFF_TIMEOUT_MS);
+        XLog.debug("screen timeout save: savedValue=" + saved + ", currentValue=" + current);
 
         if (saved == NO_SAVED_TIMEOUT && current != SCREEN_OFF_TIMEOUT_NEVER) {
             Settings.System.putInt(cr, KEY_OLD_SCREEN_OFF_TIMEOUT, current);
         }
 
         Settings.System.putInt(cr, Settings.System.SCREEN_OFF_TIMEOUT, SCREEN_OFF_TIMEOUT_NEVER);
+        XLog.debug("screen timeout set to NEVER; previousValue=" + current);
     }
 
     /**
@@ -55,11 +57,15 @@ final class ScreenTimeoutController {
     static void recoveryTimeOut() {
         ContentResolver cr = SystemContextManager.requireSystemContext().getContentResolver();
         int saved = Settings.System.getInt(cr, KEY_OLD_SCREEN_OFF_TIMEOUT, NO_SAVED_TIMEOUT);
-        if (saved == NO_SAVED_TIMEOUT) return;
+        if (saved == NO_SAVED_TIMEOUT) {
+            XLog.debug("screen timeout recovery skipped: no saved value");
+            return;
+        }
 
         Settings.System.putInt(cr, Settings.System.SCREEN_OFF_TIMEOUT, saved);
         // 清除记录，避免之后的还原带回过期的超时值。
         Settings.System.putInt(cr, KEY_OLD_SCREEN_OFF_TIMEOUT, NO_SAVED_TIMEOUT);
+        XLog.debug("screen timeout recovered to " + saved);
     }
 
 }

@@ -60,12 +60,14 @@ public final class FakeScreenIpc {
             if (systemContext != null) {
                 // 开机时把 Settings.Global 复位为关闭状态
                 Settings.Global.putInt(systemContext.getContentResolver(), FakeScreenState.KEY_FAKE_SCREEN_ENABLED, 0);
+                XLog.debug("FakeScreen state reset to disabled during system-server initialization");
                 IntentFilter filter = new IntentFilter(FakeScreenState.ACTION_TOGGLE_FAKE_SCREEN);
                 BroadcastReceiver receiver = new BroadcastReceiver() {
                     @Override
                     public void onReceive(Context context, Intent intent) {
                         boolean enabled = intent.getBooleanExtra(FakeScreenState.EXTRA_ENABLED, false);
                         sIsFakeScreenEnabled = enabled;
+                        XLog.debug("FakeScreen toggle broadcast received: enabled=" + enabled);
 
                         try {
                             Settings.Global.putInt(
@@ -73,6 +75,7 @@ public final class FakeScreenIpc {
                                     FakeScreenState.KEY_FAKE_SCREEN_ENABLED,
                                     enabled ? 1 : 0
                             );
+                            XLog.debug("FakeScreen state persisted to Settings.Global: enabled=" + enabled);
                         } catch (Exception e) {
                             XLog.error("Failed to write Settings.Global in system_server", e);
                         }

@@ -1,9 +1,8 @@
 package top.chuyb.fakeScreen.hook;
 
 import android.content.SharedPreferences;
-import android.os.Handler;
-import android.os.Looper;
 import android.util.Log;
+import android.view.KeyEvent;
 
 import io.github.libxposed.api.XposedModule;
 import io.github.libxposed.api.XposedModuleInterface;
@@ -14,6 +13,7 @@ import java.util.List;
 import top.chuyb.fakeScreen.core.Settings;
 import top.chuyb.fakeScreen.system.DisplayPowerControl;
 import top.chuyb.fakeScreen.system.FakeScreenIpc;
+import top.chuyb.fakeScreen.system.ScreenTimeoutController;
 import top.chuyb.fakeScreen.system.SystemContextManager;
 import top.chuyb.fakeScreen.util.ReflectUtils;
 import top.chuyb.fakeScreen.util.XLog;
@@ -27,9 +27,10 @@ import top.chuyb.fakeScreen.util.XLog;
  * @author chuyb-re
  */
 public class MainHook extends XposedModule {
-    private static final Handler mHandler = new Handler(Looper.getMainLooper());
-    private static Runnable mPendingPowerTask = null;
-    private static final long MULTI_PRESS_TIMEOUT_MS = 220; // 多击防抖超时
+    // 标记当前电源键按下时是否成功捕获了交互状态。
+    private static volatile boolean sPowerKeyOriginCaptured;
+    // 记录按下时设备是否处于非交互状态（通常正在休眠）。
+    private static volatile boolean sPowerKeyBeganNonInteractive;
 
     private final String PREFS_NAME ="FakeScreenSetting";
 
@@ -47,7 +48,8 @@ public class MainHook extends XposedModule {
             Class<?> pwmClass = classLoader.loadClass("com.android.server.policy.PhoneWindowManager");
             // 1. 动态注册 IPC 接收器
             registerIpcReceiver(pwmClass);
-            // 2. hook 电源键处理
+            // 2. 记录按键开始时的交互状态，再 hook 延后的 powerPress
+            hookPowerKeyDown(pwmClass);
             hookPowerButton(pwmClass, classLoader);
             // 3. 初始化模块设置并监听后续变更
             initializeSettings();
@@ -63,12 +65,16 @@ public class MainHook extends XposedModule {
         SharedPreferences remotePreferences = getRemotePreferences(PREFS_NAME);
         Settings.setCompatibilityModeOn(remotePreferences.getBoolean("CompatibilityMode", false));
         Settings.setDebugModeOn(remotePreferences.getBoolean("DebugMode", false));
+        XLog.debug("Settings loaded: compatibilityMode=" + Settings.isCompatibilityModeOn()
+                + ", debugMode=" + Settings.isDebugModeOn());
 
         remotePreferences.registerOnSharedPreferenceChangeListener((sharedPreferences, key) -> {
             if ("CompatibilityMode".equals(key)) {
                 Settings.setCompatibilityModeOn(sharedPreferences.getBoolean("CompatibilityMode", false));
+                XLog.debug("Setting changed: compatibilityMode=" + Settings.isCompatibilityModeOn());
             } else if ("DebugMode".equals(key)) {
                 Settings.setDebugModeOn(sharedPreferences.getBoolean("DebugMode", false));
+                XLog.debug("Setting changed: debugMode=" + Settings.isDebugModeOn());
             }
         });
     }
@@ -103,6 +109,46 @@ public class MainHook extends XposedModule {
     // =========================================================================
 
     /**
+     * 在系统尚未执行电源键唤醒处理时保存交互状态，供之后延迟调用的 powerPress 使用。
+     */
+    private void hookPowerKeyDown(Class<?> pwmClass) {
+        Method powerKeyDown = findPowerKeyDownMethod(pwmClass);
+        if (powerKeyDown == null) {
+            XLog.log(Log.ERROR, "Failed to find interceptPowerKeyDown(KeyEvent, boolean)");
+            return;
+        }
+        powerKeyDown.setAccessible(true);
+        hook(powerKeyDown).intercept(chain -> {
+            List<Object> args = chain.getArgs();
+            if (args.size() > 1 && args.get(1) instanceof Boolean) {
+                sPowerKeyBeganNonInteractive = !((Boolean) args.get(1));
+                sPowerKeyOriginCaptured = true;
+                KeyEvent event = args.get(0) instanceof KeyEvent ? (KeyEvent) args.get(0) : null;
+                XLog.debug("Power key down: keyCode=" + (event == null ? "unknown" : event.getKeyCode())
+                        + ", downTime=" + (event == null ? "unknown" : event.getDownTime())
+                        + ", interactive=" + !sPowerKeyBeganNonInteractive
+                        + ", captured=" + sPowerKeyOriginCaptured);
+            } else {
+                XLog.debug("Power key down: interactive argument unavailable; args=" + args);
+            }
+            return chain.proceed();
+        });
+    }
+
+    private static Method findPowerKeyDownMethod(Class<?> pwmClass) {
+        for (Method method : pwmClass.getDeclaredMethods()) {
+            if (!"interceptPowerKeyDown".equals(method.getName())) continue;
+            Class<?>[] paramTypes = method.getParameterTypes();
+            if (paramTypes.length >= 2
+                    && paramTypes[0] == KeyEvent.class
+                    && paramTypes[1] == boolean.class) {
+                return method;
+            }
+        }
+        return null;
+    }
+
+    /**
      * hook PhoneWindowManager 中的 powerPress 方法，以拦截单击手势。
      *
      * @param pwmClass    PhoneWindowManager 的 Class 引用。
@@ -117,48 +163,56 @@ public class MainHook extends XposedModule {
         powerPress.setAccessible(true);
 
         hook(powerPress).intercept(chain -> {
-            if (!FakeScreenIpc.isEnabled()) {
+            List<Object> args = chain.getArgs();
+            long eventTime = args.size() > 0 && args.get(0) instanceof Long ? (Long) args.get(0) : -1L;
+            int count = extractClickCount(args);
+            Object displayId = args.size() > 2 ? args.get(2) : "unknown";
+            boolean enabled = FakeScreenIpc.isEnabled();
+            boolean originCaptured = sPowerKeyOriginCaptured;
+            // 仅当状态确实捕获且按下时非交互，才交给系统处理唤醒。
+            boolean beganNonInteractive = originCaptured && sPowerKeyBeganNonInteractive;
+            XLog.debug("powerPress: eventTime=" + eventTime + ", count=" + count
+                    + ", displayId=" + displayId + ", fakeScreenEnabled=" + enabled
+                    + ", originCaptured=" + originCaptured
+                    + ", beganNonInteractive=" + beganNonInteractive);
+
+            if (!enabled) {
+                sPowerKeyOriginCaptured = false;
+                XLog.debug("powerPress: feature disabled; proceeding with system handling");
                 return chain.proceed();
             }
-
-            int count = extractClickCount(chain.getArgs());
 
             // 放行多击手势（例如双击启动相机）
             if (count > 1) {
-                cancelPendingPowerTask();
+                sPowerKeyOriginCaptured = false;
                 DisplayPowerControl.resetTargetMode();
+                XLog.debug("powerPress: multi-press; reset target mode and proceed with system handling");
                 return chain.proceed();
             }
-            // 拦截单击电源键
+            //尝试切换屏幕；未切换时交还系统原生处理
             if (count == 1) {
-                cancelPendingPowerTask();
-                mPendingPowerTask = () -> {
-                    try {
-                        if(!DisplayPowerControl.toggle(this, classLoader)){
-                            return;
-                        }
-                    } catch (Exception e){
-                        XLog.error("An exception occurred while switching the screen’s power mode.",e);
-                        return;
-                    }
-                    mPendingPowerTask = null;
-                };
+                sPowerKeyOriginCaptured = false;
+                if (beganNonInteractive) {
+                    XLog.debug("powerPress: key began while non-interactive; proceeding with system wake handling");
+                    return chain.proceed();
+                }
 
-                mHandler.postDelayed(mPendingPowerTask, MULTI_PRESS_TIMEOUT_MS);
-                return null; // 拦截系统原生的锁屏与休眠行为
+                try {
+                    boolean toggled = DisplayPowerControl.toggle(this, classLoader);
+                    XLog.debug("powerPress: display toggle result=" + toggled);
+                    if (toggled) {
+                        return null;
+                    }
+                } catch (Exception e) {
+                    XLog.error("An exception occurred while switching the screen’s power mode.", e);
+                    XLog.debug("powerPress: toggle raised an exception; proceeding with system handling");
+                }
+                XLog.debug("powerPress: no display toggle occurred; proceeding with system handling");
+                return chain.proceed();
             }
+            XLog.debug("powerPress: unsupported press count; proceeding with system handling");
             return chain.proceed();
         });
-    }
-
-    /**
-     * 取消 Handler 队列中待执行的电源键延时任务。
-     */
-    private void cancelPendingPowerTask() {
-        if (mPendingPowerTask != null) {
-            mHandler.removeCallbacks(mPendingPowerTask);
-            mPendingPowerTask = null;
-        }
     }
 
     /**

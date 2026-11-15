@@ -2,6 +2,7 @@ package top.chuyb.fakeScreen.util;
 
 import android.util.Log;
 import io.github.libxposed.api.XposedModule;
+import top.chuyb.fakeScreen.core.Settings;
 
 /**
  * 日志工具
@@ -22,6 +23,12 @@ public class XLog {
 
     public static void error(String message,Exception e){
         module.log(Log.ERROR,TAG,message,e);
+    }
+
+    public static void debug(String message){
+        if(Settings.isDebugModeOn()){
+            module.log(Log.DEBUG,TAG,message);
+        }
     }
     public static void init(XposedModule module){
         XLog.module=module;
