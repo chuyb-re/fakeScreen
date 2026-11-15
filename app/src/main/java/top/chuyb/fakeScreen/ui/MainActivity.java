@@ -1,8 +1,10 @@
 package top.chuyb.fakeScreen.ui;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.Window;
 import android.widget.LinearLayout;
 import android.widget.Toast;
@@ -12,7 +14,10 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.SwitchCompat;
 import androidx.core.view.WindowCompat;
 
+import io.github.libxposed.service.XposedService;
+
 import top.chuyb.fakeScreen.R;
+import top.chuyb.fakeScreen.app.App;
 import top.chuyb.fakeScreen.core.FakeScreenState;
 
 /**
@@ -22,7 +27,11 @@ import top.chuyb.fakeScreen.core.FakeScreenState;
  * @since 1.0
  * @author chuyb-re
  */
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements App.ServiceStateListener {
+
+    private volatile XposedService mService;
+    private final String PREFS_NAME ="FakeScreenSetting";
+    private boolean debugModeButtonInit =false;
 
     /**
      * 初始化界面布局、窗口元素与各控件的事件监听。
@@ -38,6 +47,34 @@ public class MainActivity extends AppCompatActivity {
         initHideIconButton();
         initGithubButton();
         initTipsButton();
+    }
+    @Override
+    protected void onStart() {
+        super.onStart();
+        App.addServiceStateListener(this, true);
+    }
+
+    @Override
+    protected void onStop() {
+        App.removeServiceStateListener(this);
+        super.onStop();
+    }
+
+    @Override
+    public void onServiceStateChanged(XposedService service) {
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+
+            mService = service;
+            Log.d("fakeScreen", "Xposed service changed; connected=" + (service != null));
+            Log.d("fakeScreen", "debugModeButtonInit:" + debugModeButtonInit);
+            if (service == null) {
+                debugModeButtonInit = false;
+            } else if (!debugModeButtonInit) {
+                Log.d("fakeScreen", "init start");
+                initDebugModeButton();
+            }
+        });
     }
 
     /**
@@ -71,6 +108,30 @@ public class MainActivity extends AppCompatActivity {
         switchBtn.setChecked(DesktopIconHelper.isHidden(this));
         switchBtn.setOnCheckedChangeListener((buttonView, isChecked) ->
                 DesktopIconHelper.applySetting(this, isChecked));
+    }
+
+    /**
+     * 绑定调试模式开关；状态初始化与点击处理逻辑待后续接入。
+     */
+    private void initDebugModeButton() {
+        SwitchCompat switchBtn = findViewById(R.id.switch_debug);
+        if (switchBtn == null) {
+            return;
+        }
+        SharedPreferences remotePreferences = mService.getRemotePreferences(PREFS_NAME);
+        switchBtn.setOnCheckedChangeListener(null);
+        switchBtn.setChecked(remotePreferences.getBoolean("DebugMode", false));
+        switchBtn.setOnCheckedChangeListener((buttonView, isChecked) ->
+        {
+            if (mService != null) {
+                Log.d("fakeScreen", "resultabc:" + isChecked);
+               remotePreferences.edit().putBoolean("DebugMode", isChecked).apply();
+            }else{
+                switchBtn.setChecked(false);
+                Toast.makeText(this,R.string.module_not_activated,Toast.LENGTH_SHORT).show();
+            }
+        });
+        debugModeButtonInit =true;
     }
 
     /**

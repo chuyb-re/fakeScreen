@@ -69,14 +69,13 @@ public class MainHook extends XposedModule {
         Settings.setDebugModeOn(remotePreferences.getBoolean("DebugMode", false));
         XLog.debug("Settings loaded: compatibilityMode=" + Settings.isCompatibilityModeOn()
                 + ", debugMode=" + Settings.isDebugModeOn());
-
         remotePreferences.registerOnSharedPreferenceChangeListener((sharedPreferences, key) -> {
             if ("CompatibilityMode".equals(key)) {
                 Settings.setCompatibilityModeOn(sharedPreferences.getBoolean("CompatibilityMode", false));
                 XLog.debug("Setting changed: compatibilityMode=" + Settings.isCompatibilityModeOn());
             } else if ("DebugMode".equals(key)) {
                 Settings.setDebugModeOn(sharedPreferences.getBoolean("DebugMode", false));
-                XLog.debug("Setting changed: debugMode=" + Settings.isDebugModeOn());
+                XLog.log(Log.INFO,"Setting changed: debugMode=" + Settings.isDebugModeOn());
             }
         });
     }
